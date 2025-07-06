@@ -1,0 +1,5 @@
+image_bucket: "flyio-platform-hiring-challenge"
+image_prefix: "images"
+state_dir: "state"
+aws_region: "us-east-1"
+thin_pool_device: "/dev/mapper/test_pool"

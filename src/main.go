@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -15,12 +16,16 @@ import (
 )
 
 func main() {
+	initConfig()
+	initStateDb()
+	initS3Client()
+
 	db := initStateDb()
 	defer db.Close()
 
 	cfg := fsm.Config{
 		Logger: log.WithFields(log.Fields{}),
-		DBPath: CFG.stateDir,
+		DBPath: CFG.StateDir,
 		Queues: map[string]int{"main": 5},
 	}
 	manager, err := fsm.New(cfg)
@@ -38,7 +43,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("start/", startHandler{starter: fsmStarter})
-	socket := filepath.Join(CFG.stateDir, "flyd-sketch.sock")
+	socket := filepath.Join(CFG.StateDir, "flyd-sketch.sock")
 	os.Remove(socket)
 	unixListener, _ := net.Listen("unix", socket)
 	defer os.Remove(socket)
@@ -67,8 +72,16 @@ type startHandler struct {
 
 func (s startHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		log.Error("Couldn't parse query")
+		return
+	}
+	imageId := string(bodyBytes)
+
 	var fsmReq *MsgReq = fsm.NewRequest(
-		&ReqMsg{imageId: "parsedBody"},
+		&ReqMsg{imageId: imageId},
 		newMsg("respmsg"))
 	runId := ulid.Make().String()
 	s.starter(ctx, runId, fsmReq)
@@ -77,22 +90,82 @@ func (s startHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func PullTransition(cnt context.Context, req *MsgReq) (*MsgResp, error) {
 	resp := fsm.NewResponse(newMsg("pulled"))
 	imageId := req.Msg.imageId
-	_, exists := imageSnapshotId(imageId)
+	_, exists, err := getVolumeId(req.Run().ID)
+	if err != nil {
+		return fsm.NewResponse(newMsg("failed")), fsm.Abort(err)
+	}
 	if exists {
 		log.WithField("image_id", imageId).Info("We pulled this image before. Skipping this step")
 		return resp, nil
 	}
 	log.WithField("image_id", imageId).Info("Pulling image")
-	// pull
+	err = ensureLocalImage(imageId)
+	if err != nil {
+		return fsm.NewResponse(newMsg("failed")), fsm.Abort(err)
+	}
 	return resp, nil
 }
 
 func ExtractTransition(cnt context.Context, req *MsgReq) (*MsgResp, error) {
 	resp := fsm.NewResponse(newMsg("extracted"))
+	imageId := req.Msg.imageId
+	_, exists, err := getVolumeId(imageId)
+	if err != nil {
+		return fsm.NewResponse(newMsg("failed")), fsm.Abort(err)
+	}
+	if exists {
+		log.WithField("image_id", imageId).Info("Snapshot for this image already exists. Skip extraction.")
+		return resp, nil
+	}
+	errc := make(chan error)
+	defer func() {
+		defer close(errc)
+		select {
+		case <-errc:
+			deleteVolumeRecord(req.Run().ID)
+		default:
+		}
+	}()
+	failedResp := fsm.NewResponse(newMsg("failed"))
+
+	volumeId, err := generateVolumeId(imageId)
+	if err != nil {
+		return failedResp, fsm.Abort(err)
+	}
+	err = registerOrdinal(volumeId)
+	if err != nil {
+		return failedResp, fsm.Abort(err)
+	}
+	localImagePath := imageLocalPath(imageId)
+	err = extractImageToDevice(localImagePath, volumeId)
+	if err != nil {
+		return failedResp, fsm.Abort(err)
+	}
 	return resp, nil
 }
 
 func ActivateTransition(cnt context.Context, req *MsgReq) (*MsgResp, error) {
 	resp := fsm.NewResponse(newMsg("activated"))
+	imageId := req.Msg.imageId
+	_, exists, err := getSnapshotId(imageId)
+	if err != nil {
+		return fsm.NewResponse(newMsg("failed")), fsm.Abort(err)
+	}
+	if exists {
+		log.WithField("image_id", imageId).Info("Snapshot already exists. Assuming the image is activated.")
+		return resp, nil
+	}
+	volumeId, exists, err := getVolumeId(imageId)
+	if err != nil || !exists {
+		return fsm.NewResponse(newMsg("failed")), fsm.Abort(err)
+	}
+	snapshotId, err := generateSnapshotId(req.Run().ID, imageId)
+	if err != nil {
+		return fsm.NewResponse(newMsg("failed")), fsm.Abort(err)
+	}
+	err = createSnapshot(volumeId, snapshotId)
+	if err != nil {
+		return fsm.NewResponse(newMsg("failed")), fsm.Abort(err)
+	}
 	return resp, nil
 }

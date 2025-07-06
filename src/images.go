@@ -20,8 +20,8 @@ func listObjectsForImage(imageId string) ([]string, error) {
 	}
 	// Get the first page of results for ListObjectsV2 for a bucket
 	output, err := s3Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
-		Bucket: aws.String(CFG.imageBucket),
-		Prefix: aws.String(CFG.imagePrefix + "/" + imageId),
+		Bucket: aws.String(CFG.ImageBucket),
+		Prefix: aws.String(CFG.ImagePrefix + "/" + imageId),
 	})
 	if err != nil {
 		return []string{}, err
@@ -40,11 +40,11 @@ func listObjectsForImage(imageId string) ([]string, error) {
 }
 
 func imageLocalPath(imageId string) string {
-	return filepath.Join(CFG.stateDir, CACHE_DIR, imageId)
+	return filepath.Join(CFG.StateDir, CACHE_DIR, imageId)
 }
 
 func imageRemotePath(imageId string) string {
-	remotePath := "s3://" + CFG.imageBucket + "/" + CFG.imagePrefix + "/" + imageId
+	remotePath := "s3://" + CFG.ImageBucket + "/" + CFG.ImagePrefix + "/" + imageId
 	return remotePath
 }
 
@@ -82,6 +82,7 @@ func downloadImage(imageId string) error {
 	return nil
 }
 
+/*
 func main() {
 	initConfig()
 	initS3Client()
@@ -92,3 +93,4 @@ func main() {
 	err = ensureLocalImage("python")
 	log.Info(err)
 }
+*/

@@ -12,7 +12,7 @@ var s3Client *s3.Client
 
 func initS3Client() *s3.Client {
 	// Load the Shared AWS Configuration (~/.aws/config)
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(CFG.awsRegion), config.WithCredentialsProvider(aws.AnonymousCredentials{}))
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(CFG.AwsRegion), config.WithCredentialsProvider(aws.AnonymousCredentials{}))
 	if err != nil {
 		log.Fatal(err)
 	}

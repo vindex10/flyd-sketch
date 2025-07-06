@@ -7,6 +7,8 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 METADATA_FILE="pool_meta"
 DATA_FILE="pool_data"
 POOL_NAME="test_pool"
+IMAGECACHE_DIR="$SCRIPT_DIR/imagecache"
+STATE_DIR="$SCRIPT_DIR/state"
 
 function init() {
 	if [ -n "$METADATA_DEV" ]; then
@@ -20,6 +22,9 @@ function init() {
 	METADATA_DEV="$(losetup -f --show "$METADATA_FILE" 2>/dev/null)"
 	DATA_DEV="$(losetup -f --show "$DATA_FILE" 2>/dev/null)"
 	dmsetup create --verifyudev "$POOL_NAME" --table "0 4194304 thin-pool ${METADATA_DEV} ${DATA_DEV} 2048 32768"
+	mkdir -p "$IMAGECACHE_DIR"
+	mkdir -p "$STATE_DIR"
+	ln -s "$IMAGECACHE_DIR" "$STATE_DIR"/"imagecache"
 }
 
 
