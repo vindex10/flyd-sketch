@@ -1,8 +1,8 @@
 package main
 
 import (
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 )
@@ -11,71 +11,58 @@ const DEV_PREFIX = "dev"
 const MNT_DIR = "mnt"
 
 func registerOrdinal(id int) error {
-	cmd := exec.Command("dmsetup", "message", CFG.ThinPoolDevice, "0", "create_thin "+strconv.Itoa(id))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	err := runCmdVerbose(
+		"dmsetup",
+		"message",
+		CFG.ThinPoolDevice,
+		"0",
+		fmt.Sprintf("create_thin %d", id),
+	)
+	if err != nil {
 		return err
 	}
 	return nil
 }
 
-//func makeSnapshot() (int, error) {
-//return 0, nil
-//}
-
-func extractImageToDevice(localPath string, volumeId int) error {
-	entries, err := os.ReadDir(localPath)
+func extractImageToDevice(imageId string, volumeId int) error {
+	devName := getDeviceName(volumeId)
+	localPath := imageLocalPath(imageId)
+	totSizeBytes, err := imageEstimateUnpackedSizeBytes(imageId)
 	if err != nil {
 		return err
 	}
-	var totSizeBytes int64
-	for _, e := range entries {
-		fname := filepath.Join(localPath, e.Name())
-		size, err := estimateTarSizeBytes(fname)
-		if err != nil {
-			return err
-		}
-		totSizeBytes += size
-	}
-	// 5% of blocks are reserved. add some buffer
-	totSectors := int64(float64(totSizeBytes/SECTOR_SIZE_BYTES) * FS_ESTIMATE_BUFFER)
-	devName := DEV_PREFIX + strconv.Itoa(volumeId)
-	cmd := exec.Command("dmsetup", "create", devName, "--table", "0 "+strconv.FormatInt(totSectors, 10)+" thin "+CFG.ThinPoolDevice+" "+strconv.Itoa(volumeId))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	totSectors := estimateNewVolumeSizeSectors(totSizeBytes)
+	err = runCmdVerbose(
+		"dmsetup",
+		"create",
+		devName,
+		"--table",
+		fmt.Sprintf("0 %d thin %s %d", totSectors, CFG.ThinPoolDevice, volumeId),
+	)
 	if err != nil {
 		return err
 	}
-	cmd = exec.Command("mkfs.ext4", "/dev/mapper/"+devName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	devPath := "/dev/mapper/" + devName
+	err = runCmdVerbose("mkfs.ext4", devPath)
 	if err != nil {
 		return err
 	}
 	tmpMountDir := filepath.Join(CFG.StateDir, MNT_DIR, devName)
 	os.MkdirAll(tmpMountDir, 0700)
 	defer os.Remove(tmpMountDir)
-	cmd = exec.Command("mount", "/dev/mapper/"+devName, tmpMountDir)
+	err = runCmdVerbose("mount", devPath, tmpMountDir)
+	if err != nil {
+		return err
+	}
 	defer func() {
-		cmd = exec.Command("umount", tmpMountDir)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
+		runCmdVerbose("umount", tmpMountDir)
 	}()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+	entries, err := os.ReadDir(localPath)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
-		cmd := exec.Command("tar", "xf", filepath.Join(localPath, e.Name()), "-C", tmpMountDir)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err := cmd.Run()
+		err := runCmdVerbose("tar", "xf", filepath.Join(localPath, e.Name()), "-C", tmpMountDir)
 		if err != nil {
 			return err
 		}
@@ -83,28 +70,34 @@ func extractImageToDevice(localPath string, volumeId int) error {
 	return nil
 }
 
-func createSnapshot(volumeId int, snapshotId int) error {
-	devName := DEV_PREFIX + strconv.Itoa(volumeId)
-	cmd := exec.Command("dmsetup", "suspend", "/dev/mapper/"+devName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		return err
-	}
-	cmd = exec.Command("dmsetup", "message", CFG.ThinPoolDevice, "0", "create_snap "+strconv.Itoa(snapshotId)+" "+strconv.Itoa(volumeId))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		return err
-	}
-	cmd = exec.Command("dmsetup", "resume", "/dev/mapper/"+devName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
+func suspendVolume(volumeId int) error {
+	devPath := "/dev/mapper/" + getDeviceName(volumeId)
+	err := runCmdVerbose("dmsetup", "suspend", devPath)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func createSnapshot(volumeId int, snapshotId int) error {
+	err := runCmdVerbose(
+		"dmsetup",
+		"message",
+		CFG.ThinPoolDevice,
+		"0",
+		fmt.Sprintf("create_snap %d %d", snapshotId, volumeId),
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getDeviceName(volumeId int) string {
+	return DEV_PREFIX + strconv.Itoa(volumeId)
+}
+
+func estimateNewVolumeSizeSectors(totBytes int64) int64 {
+	// 5% of blocks are reserved by fs. add some buffer
+	return int64(float64(totBytes/SECTOR_SIZE_BYTES) * FS_ESTIMATE_BUFFER)
 }

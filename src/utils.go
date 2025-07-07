@@ -1,6 +1,7 @@
 package main
 
 import "math"
+import "os"
 import "strings"
 import "os/exec"
 import "bufio"
@@ -11,6 +12,8 @@ const BLOCKSIZE_BYTES int64 = 4096
 const FS_ESTIMATE_BUFFER float64 = 1.2
 
 func estimateTarSizeBytes(tarpath string) (int64, error) {
+	// ext4 counts folders as 4k, tar does not
+	// use tar -tvf and round up object sizes to minimal block size
 	blocksizeF64 := float64(BLOCKSIZE_BYTES)
 	output, err := exec.Command("tar", "tvf", tarpath).Output()
 	if err != nil {
@@ -30,4 +33,12 @@ func estimateTarSizeBytes(tarpath string) (int64, error) {
 		tot += estimate
 	}
 	return tot, nil
+}
+
+func runCmdVerbose(args ...string) error {
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	return err
 }

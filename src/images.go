@@ -21,13 +21,13 @@ func listObjectsForImage(imageId string) ([]string, error) {
 	// Get the first page of results for ListObjectsV2 for a bucket
 	output, err := s3Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
 		Bucket: aws.String(CFG.ImageBucket),
-		Prefix: aws.String(CFG.ImagePrefix + "/" + imageId),
+		Prefix: aws.String(filepath.Join(CFG.ImagePrefix, imageId)),
 	})
 	if err != nil {
 		return []string{}, err
 	}
 
-	// if there are too many objects - process pages.
+	// NOTE: we don't process pages. if there are too many objects this may be an issue
 	res := []string{}
 	for _, object := range output.Contents {
 		log.
@@ -44,7 +44,7 @@ func imageLocalPath(imageId string) string {
 }
 
 func imageRemotePath(imageId string) string {
-	remotePath := "s3://" + CFG.ImageBucket + "/" + CFG.ImagePrefix + "/" + imageId
+	remotePath := filepath.Join("s3://", CFG.ImageBucket, CFG.ImagePrefix, imageId)
 	return remotePath
 }
 
@@ -80,6 +80,27 @@ func downloadImage(imageId string) error {
 		return err
 	}
 	return nil
+}
+
+func imageEstimateUnpackedSizeBytes(imageId string) (int64, error) {
+	localPath := imageLocalPath(imageId)
+	if _, err := os.Stat(localPath); os.IsNotExist(err) {
+		return -1, err
+	}
+	entries, err := os.ReadDir(localPath)
+	if err != nil {
+		return -1, err
+	}
+	var totSizeBytes int64
+	for _, e := range entries {
+		fname := filepath.Join(localPath, e.Name())
+		size, err := estimateTarSizeBytes(fname)
+		if err != nil {
+			return -1, err
+		}
+		totSizeBytes += size
+	}
+	return totSizeBytes, nil
 }
 
 /*

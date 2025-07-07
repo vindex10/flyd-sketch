@@ -41,6 +41,21 @@ function deinit() {
 }
 
 
+function devol() {
+	volId="$1"
+	set +e
+	umount "/dev/mapper/dev$volId"
+	dmsetup remove "dev$volId"
+	dmsetup message "$POOL_NAME" 0 "delete $volId"
+	set -e
+}
+
+function deloop() {
+	loopId="$1"
+	losetup -d "/dev/loop$loopId"
+}
+
+
 function run() {
 	go run ./src
 }
@@ -56,10 +71,4 @@ METADATA_DEV="$(losetup -j "$METADATA_FILE" 2>/dev/null | awk -F':' '{print $1}'
 DATA_DEV="$(losetup -j "$DATA_FILE" 2>/dev/null | awk -F':' '{print $1}' | head -n1)"
 
 cmd="$1"; shift
-
-if [ -z "$METADATA_DEV" ] && [ ! "$cmd" -eq "init" ]; then
-	echo "Run init first. Exit.";
-	exit 1;
-fi
-
 $cmd "$@"

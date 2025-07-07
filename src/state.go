@@ -18,14 +18,24 @@ func initStateDb() *sql.DB {
 }
 
 func initTables() {
+	// can benefit from defining constraints
+	// if descriptors was a table we could apply uniqueness constraints there, historically it happened this way.
 	stateDb.Exec("CREATE TABLE IF NOT EXISTS snapshot (run_id text, image_id text, snapshot_id integer);")
 	stateDb.Exec("CREATE TABLE IF NOT EXISTS volume (image_id text, volume_id integer);")
-	stateDb.Exec("CREATE VIEW IF NOT EXISTS descriptor AS select 'snapshot' as type, snapshot_id as id from snapshot UNION ALL select 'volume' as type, volume_id as id from volume;")
+	stateDb.Exec(
+		"CREATE VIEW IF NOT EXISTS descriptor AS " +
+			"select 'snapshot' as type, snapshot_id as id from snapshot " +
+			"UNION ALL " +
+			"select 'volume' as type, volume_id as id from volume;",
+	)
 }
 
 func generateVolumeId(imageId string) (int, error) {
 	var volumeId int
-	err := stateDb.QueryRow("INSERT INTO volume (image_id, volume_id) VALUES (?, (SELECT coalesce(max(id)+1, 0) FROM descriptor)) RETURNING volume_id", imageId).Scan(&volumeId)
+	err := stateDb.QueryRow(
+		"INSERT INTO volume (image_id, volume_id) "+
+			"VALUES (?, (SELECT coalesce(max(id)+1, 0) FROM descriptor)) "+
+			"RETURNING volume_id", imageId).Scan(&volumeId)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	} else if err != nil {
@@ -55,7 +65,10 @@ func deleteVolumeRecord(imageId string) error {
 
 func generateSnapshotId(runId string, imageId string) (int, error) {
 	var snapshotId int
-	err := stateDb.QueryRow("INSERT INTO snapshot (run_id, image_id, snapshot_id) VALUES (?, ?, (SELECT coalesce(max(id)+1, 0) FROM descriptor)) RETURNING snapshot_id", runId, imageId).Scan(&snapshotId)
+	err := stateDb.QueryRow(
+		"INSERT INTO snapshot (run_id, image_id, snapshot_id) "+
+			"VALUES (?, ?, (SELECT coalesce(max(id)+1, 0) FROM descriptor)) "+
+			"RETURNING snapshot_id", runId, imageId).Scan(&snapshotId)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	} else if err != nil {
